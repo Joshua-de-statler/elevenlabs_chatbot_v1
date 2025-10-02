@@ -8,7 +8,6 @@ from langchain_google_vertexai import ChatVertexAI
 from elevenlabs import ElevenLabs
 from supabase import create_client, Client
 from langchain_core.messages import HumanMessage, AIMessage
-# NEW IMPORT FOR HANDLING CREDENTIALS
 from google.oauth2 import service_account
 
 # --- ENHANCED DEBUGGING & CREDENTIALS LOADING ---
@@ -25,7 +24,6 @@ print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json_
 credentials = None
 if google_creds_json_str:
     try:
-        # Convert the JSON string from the environment variable into a credentials object
         credentials_info = json.loads(google_creds_json_str)
         credentials = service_account.Credentials.from_service_account_info(credentials_info)
         print("Successfully created credentials object from JSON.")
@@ -59,8 +57,6 @@ CONVERSATION_TABLE = "conversations"
 
 # --- FASTAPI APP ---
 app = FastAPI()
-
-# ... (The rest of your code from /incoming-call onwards remains exactly the same) ...
 
 @app.post("/incoming-call", response_class=Response)
 def handle_incoming_call():
@@ -96,8 +92,9 @@ def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...
         "history_json": new_history_json
     }).execute()
 
-    # 5. Generate and upload audio
-    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
+    # 5. Generate and upload audio -- THIS IS THE CORRECTED LINE --
+    audio_bytes = elevenlabs_client.tts.generate(text=ai_text, voice="Rachel")
+    
     file_name = f"{uuid.uuid4()}.mp3"
     supabase.storage.from_(BUCKET_NAME).upload(file=audio_bytes, path=file_name, file_options={"content-type": "audio/mpeg"})
     public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
