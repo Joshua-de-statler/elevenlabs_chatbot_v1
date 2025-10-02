@@ -8,27 +8,42 @@ from langchain_google_vertexai import ChatVertexAI
 from elevenlabs import ElevenLabs
 from supabase import create_client, Client
 from langchain_core.messages import HumanMessage, AIMessage
+# NEW IMPORT FOR HANDLING CREDENTIALS
+from google.oauth2 import service_account
 
-# --- ENHANCED DEBUGGING ---
-# The following lines will print your environment variables to the Railway logs on startup.
-# This helps us verify they are being loaded correctly.
+# --- ENHANCED DEBUGGING & CREDENTIALS LOADING ---
 print("---- LOADING ENVIRONMENT VARIABLES ----")
 gcp_project_id = os.environ.get("GCP_PROJECT_ID")
 gcp_region = os.environ.get("GCP_REGION")
-google_creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+google_creds_json_str = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
 
 print(f"GCP_PROJECT_ID is set: {'Yes' if gcp_project_id else 'No'}")
 print(f"GCP_REGION is set: {'Yes' if gcp_region else 'No'}")
-print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json else 'No'}")
+print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json_str else 'No'}")
+
+# --- EXPLICIT CREDENTIALS OBJECT CREATION ---
+credentials = None
+if google_creds_json_str:
+    try:
+        # Convert the JSON string from the environment variable into a credentials object
+        credentials_info = json.loads(google_creds_json_str)
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        print("Successfully created credentials object from JSON.")
+    except Exception as e:
+        print(f"Error creating credentials from JSON: {e}")
+else:
+    print("Credentials JSON string is missing.")
+
 print("------------------------------------")
 
 # --- CLIENT INITIALIZATIONS ---
 
-# Gemini LLM Client
+# Gemini LLM Client (now with explicit credentials)
 llm = ChatVertexAI(
     model="gemini-2.5-flash-001",
     project=gcp_project_id,
     location=gcp_region,
+    credentials=credentials,
 )
 
 # ElevenLabs TTS Client
@@ -43,8 +58,9 @@ BUCKET_NAME = "audio-files"
 CONVERSATION_TABLE = "conversations"
 
 # --- FASTAPI APP ---
-
 app = FastAPI()
+
+# ... (The rest of your code from /incoming-call onwards remains exactly the same) ...
 
 @app.post("/incoming-call", response_class=Response)
 def handle_incoming_call():
