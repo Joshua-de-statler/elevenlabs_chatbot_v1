@@ -4,7 +4,8 @@ import uuid
 from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 from langchain_google_vertexai import ChatVertexAI
-from elevenlabs.client import ElevenLabsClient
+# CORRECTED IMPORT STATEMENT
+from elevenlabs import ElevenLabs 
 from supabase import create_client, Client
 
 # --- CLIENT INITIALIZATIONS ---
@@ -16,8 +17,8 @@ llm = ChatVertexAI(
     location=os.environ.get("GCP_REGION"),
 )
 
-# ElevenLabs TTS Client
-elevenlabs_client = ElevenLabsClient(api_key=os.environ.get("ELEVENLABS_API_KEY"))
+# CORRECTED ELEVENLABS CLIENT INITIALIZATION
+elevenlabs_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 
 # Supabase Storage Client
 supabase_url = os.environ.get("SUPABASE_URL")
@@ -50,7 +51,6 @@ def handle_process_speech(SpeechResult: str = Form(...)):
     print(f"Gemini responded: {ai_text}")
 
     # 2. Generate audio from ElevenLabs
-    # Replace "Rachel" with the name of the voice you chose.
     audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
 
     # 3. Upload audio to Supabase Storage
@@ -64,7 +64,6 @@ def handle_process_speech(SpeechResult: str = Form(...)):
     # 5. Respond with TwiML to play the audio and continue the conversation
     response = VoiceResponse()
     response.play(public_url)
-    # This <Gather> makes the conversation continuous, listening for the next thing the user says.
     response.gather(input='speech', action='/process-speech', speech_timeout='auto')
 
     return Response(content=str(response), media_type="application/xml")
