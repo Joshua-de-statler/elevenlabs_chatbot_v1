@@ -3,3 +3,5 @@ uvicorn
 twilio
 python-dotenv
 python-multipart
+langchain
+langchain-google-vertexai
