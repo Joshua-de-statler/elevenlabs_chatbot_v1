@@ -1,31 +1,46 @@
 # main.py
 import os
 import uuid
+import json
 from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 from langchain_google_vertexai import ChatVertexAI
-# CORRECTED IMPORT STATEMENT
-from elevenlabs import ElevenLabs 
+from elevenlabs import ElevenLabs
 from supabase import create_client, Client
+from langchain_core.messages import HumanMessage, AIMessage
+
+# --- ENHANCED DEBUGGING ---
+# The following lines will print your environment variables to the Railway logs on startup.
+# This helps us verify they are being loaded correctly.
+print("---- LOADING ENVIRONMENT VARIABLES ----")
+gcp_project_id = os.environ.get("GCP_PROJECT_ID")
+gcp_region = os.environ.get("GCP_REGION")
+google_creds_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+
+print(f"GCP_PROJECT_ID is set: {'Yes' if gcp_project_id else 'No'}")
+print(f"GCP_REGION is set: {'Yes' if gcp_region else 'No'}")
+print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json else 'No'}")
+print("------------------------------------")
 
 # --- CLIENT INITIALIZATIONS ---
 
 # Gemini LLM Client
 llm = ChatVertexAI(
     model="gemini-2.5-flash-001",
-    project=os.environ.get("GCP_PROJECT_ID"),
-    location=os.environ.get("GCP_REGION"),
+    project=gcp_project_id,
+    location=gcp_region,
 )
 
-# CORRECTED ELEVENLABS CLIENT INITIALIZATION
+# ElevenLabs TTS Client
 elevenlabs_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
 
-# Supabase Storage Client
+# Supabase Client
 supabase_url = os.environ.get("SUPABASE_URL")
 supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
 
-BUCKET_NAME = "audio-files" # The public bucket you created
+BUCKET_NAME = "audio-files"
+CONVERSATION_TABLE = "conversations"
 
 # --- FASTAPI APP ---
 
@@ -33,7 +48,6 @@ app = FastAPI()
 
 @app.post("/incoming-call", response_class=Response)
 def handle_incoming_call():
-    """Greets the caller and waits for them to speak."""
     response = VoiceResponse()
     response.say("Hello, how can I help you today?", voice='alice')
     response.gather(input='speech', action='/process-speech', speech_timeout='auto')
@@ -41,33 +55,40 @@ def handle_incoming_call():
 
 
 @app.post("/process-speech", response_class=Response)
-def handle_process_speech(SpeechResult: str = Form(...)):
-    """Processes speech, generates AI audio, and plays it back."""
+def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...)):
     print(f"User said: {SpeechResult}")
+    
+    # 1. Retrieve conversation history from Supabase
+    result = supabase.table(CONVERSATION_TABLE).select("history_json").eq("call_sid", CallSid).execute()
+    history = []
+    if result.data:
+        history_json = result.data[0]['history_json']
+        history = [HumanMessage(content=msg['content']) if msg['type'] == 'human' else AIMessage(content=msg['content']) for msg in history_json]
 
-    # 1. Get text response from Gemini
-    ai_response = llm.invoke(SpeechResult)
+    # 2. Get text response from Gemini (with history)
+    ai_response = llm.invoke(history + [HumanMessage(content=SpeechResult)])
     ai_text = ai_response.content
     print(f"Gemini responded: {ai_text}")
 
-    # 2. Generate audio from ElevenLabs
-    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
+    # 3. Update history with the new messages
+    new_history = history + [HumanMessage(content=SpeechResult), AIMessage(content=ai_text)]
+    new_history_json = [{"type": "human", "content": msg.content} if isinstance(msg, HumanMessage) else {"type": "ai", "content": msg.content} for msg in new_history]
+    
+    # 4. Upsert the updated history to Supabase
+    supabase.table(CONVERSATION_TABLE).upsert({
+        "call_sid": CallSid,
+        "history_json": new_history_json
+    }).execute()
 
-    # 3. Upload audio to Supabase Storage
+    # 5. Generate and upload audio
+    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
     file_name = f"{uuid.uuid4()}.mp3"
     supabase.storage.from_(BUCKET_NAME).upload(file=audio_bytes, path=file_name, file_options={"content-type": "audio/mpeg"})
-
-    # 4. Get the public URL for the audio file
     public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
-    print(f"Audio URL: {public_url}")
-
-    # 5. Respond with TwiML to play the audio and continue the conversation
+    
+    # 6. Respond with TwiML
     response = VoiceResponse()
     response.play(public_url)
     response.gather(input='speech', action='/process-speech', speech_timeout='auto')
-
+    
     return Response(content=str(response), media_type="application/xml")
-
-@app.get("/")
-def read_root():
-    return {"Status": "OK"}
