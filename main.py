@@ -36,7 +36,7 @@ print("------------------------------------")
 
 # --- CLIENT INITIALIZATIONS ---
 llm = ChatVertexAI(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-001",
     project=gcp_project_id,
     location=gcp_region,
     credentials=credentials,
@@ -81,8 +81,8 @@ def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...
         "history_json": new_history_json
     }).execute()
 
-    # CORRECTED METHOD CALL
-    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
+    # CORRECTED METHOD CALL BASED ON DOCUMENTATION
+    audio_bytes = elevenlabs_client.tts.generate(text=ai_text, voice="Rachel")
     
     file_name = f"{uuid.uuid4()}.mp3"
     supabase.storage.from_(BUCKET_NAME).upload(file=audio_bytes, path=file_name, file_options={"content-type": "audio/mpeg"})
