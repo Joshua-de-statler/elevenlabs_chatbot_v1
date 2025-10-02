@@ -5,12 +5,14 @@ import json
 from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 from langchain_google_vertexai import ChatVertexAI
+# This is the correct import for version 1.0.0
 from elevenlabs.client import ElevenLabs
 from supabase import create_client, Client
 from langchain_core.messages import HumanMessage, AIMessage
 from google.oauth2 import service_account
 
 # --- ENHANCED DEBUGGING & CREDENTIALS LOADING ---
+# This section remains the same for robust authentication.
 print("---- LOADING ENVIRONMENT VARIABLES ----")
 gcp_project_id = os.environ.get("GCP_PROJECT_ID")
 gcp_region = os.environ.get("GCP_REGION")
@@ -20,7 +22,6 @@ print(f"GCP_PROJECT_ID is set: {'Yes' if gcp_project_id else 'No'}")
 print(f"GCP_REGION is set: {'Yes' if gcp_region else 'No'}")
 print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json_str else 'No'}")
 
-# --- EXPLICIT CREDENTIALS OBJECT CREATION ---
 credentials = None
 if google_creds_json_str:
     try:
@@ -31,7 +32,6 @@ if google_creds_json_str:
         print(f"Error creating credentials from JSON: {e}")
 else:
     print("Credentials JSON string is missing.")
-
 print("------------------------------------")
 
 # --- CLIENT INITIALIZATIONS ---
@@ -81,8 +81,8 @@ def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...
         "history_json": new_history_json
     }).execute()
 
-    # CORRECTED METHOD CALL BASED ON DOCUMENTATION
-    audio_bytes = elevenlabs_client.tts.generate(text=ai_text, voice="Rachel")
+    # --- THIS IS THE FINAL CORRECTED METHOD CALL ---
+    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
     
     file_name = f"{uuid.uuid4()}.mp3"
     supabase.storage.from_(BUCKET_NAME).upload(file=audio_bytes, path=file_name, file_options={"content-type": "audio/mpeg"})

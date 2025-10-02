@@ -5,5 +5,5 @@ python-dotenv
 python-multipart
 langchain
 langchain-google-vertexai
-elevenlabs>=1.0.0
+elevenlabs==1.0.0
 supabase
