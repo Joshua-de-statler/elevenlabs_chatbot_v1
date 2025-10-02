@@ -40,7 +40,7 @@ print("------------------------------------")
 
 # Gemini LLM Client (now with explicit credentials)
 llm = ChatVertexAI(
-    model="gemini-2.5-flash-001",
+    model="gemini-2.5-flash",
     project=gcp_project_id,
     location=gcp_region,
     credentials=credentials,
