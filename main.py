@@ -1,21 +1,36 @@
 # main.py
 import os
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 
 app = FastAPI()
 
 @app.post("/incoming-call", response_class=Response)
 def handle_incoming_call():
-    """Handles incoming calls from Twilio."""
-    # Create a new TwiML response
+    """Greets the caller and waits for them to speak."""
     response = VoiceResponse()
     
-    # Use the <Say> verb to read a message
-    response.say("Hello, and welcome. The connection to our server is successful.", voice='alice')
+    response.say("Hello, how can I help you today?", voice='alice')
     
-    # Return the TwiML as an XML string
+    # <Gather> listens for speech and sends the result to the /process-speech endpoint
+    response.gather(input='speech', action='/process-speech', speech_timeout='auto')
+    
     return Response(content=str(response), media_type="application/xml")
+
+
+@app.post("/process-speech", response_class=Response)
+def handle_process_speech(SpeechResult: str = Form(...)):
+    """Receives the transcribed text and logs it."""
+    # Log the transcribed text to our Railway console
+    print(f"User said: {SpeechResult}")
+    
+    response = VoiceResponse()
+    
+    # For now, give a simple confirmation message.
+    response.say("Thank you. I am processing your request.", voice='alice')
+    
+    return Response(content=str(response), media_type="application/xml")
+
 
 @app.get("/")
 def read_root():
