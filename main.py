@@ -1,16 +1,32 @@
 # main.py
 import os
-import json
+import uuid
 from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 from langchain_google_vertexai import ChatVertexAI
+from elevenlabs.client import ElevenLabsClient
+from supabase import create_client, Client
 
-# Explicitly initialize the Gemini LLM with project and location
+# --- CLIENT INITIALIZATIONS ---
+
+# Gemini LLM Client
 llm = ChatVertexAI(
     model="gemini-2.5-flash-001",
     project=os.environ.get("GCP_PROJECT_ID"),
     location=os.environ.get("GCP_REGION"),
 )
+
+# ElevenLabs TTS Client
+elevenlabs_client = ElevenLabsClient(api_key=os.environ.get("ELEVENLABS_API_KEY"))
+
+# Supabase Storage Client
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
+supabase: Client = create_client(supabase_url, supabase_key)
+
+BUCKET_NAME = "audio-files" # The public bucket you created
+
+# --- FASTAPI APP ---
 
 app = FastAPI()
 
@@ -25,22 +41,33 @@ def handle_incoming_call():
 
 @app.post("/process-speech", response_class=Response)
 def handle_process_speech(SpeechResult: str = Form(...)):
-    """Processes user's speech, gets a response from Gemini, and logs it."""
+    """Processes speech, generates AI audio, and plays it back."""
     print(f"User said: {SpeechResult}")
-    
-    # Get a response from the LLM
+
+    # 1. Get text response from Gemini
     ai_response = llm.invoke(SpeechResult)
     ai_text = ai_response.content
-    
-    # Log the AI's response
     print(f"Gemini responded: {ai_text}")
-    
-    response = VoiceResponse()
-    # We will still use a static message for now. The next step is to speak the AI's response.
-    response.say("Thank you. I am processing your request.", voice='alice')
-    
-    return Response(content=str(response), media_type="application/xml")
 
+    # 2. Generate audio from ElevenLabs
+    # Replace "Rachel" with the name of the voice you chose.
+    audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
+
+    # 3. Upload audio to Supabase Storage
+    file_name = f"{uuid.uuid4()}.mp3"
+    supabase.storage.from_(BUCKET_NAME).upload(file=audio_bytes, path=file_name, file_options={"content-type": "audio/mpeg"})
+
+    # 4. Get the public URL for the audio file
+    public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
+    print(f"Audio URL: {public_url}")
+
+    # 5. Respond with TwiML to play the audio and continue the conversation
+    response = VoiceResponse()
+    response.play(public_url)
+    # This <Gather> makes the conversation continuous, listening for the next thing the user says.
+    response.gather(input='speech', action='/process-speech', speech_timeout='auto')
+
+    return Response(content=str(response), media_type="application/xml")
 
 @app.get("/")
 def read_root():
