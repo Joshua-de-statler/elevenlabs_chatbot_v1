@@ -1,13 +1,15 @@
 # main.py
 import os
-import json
 from fastapi import FastAPI, Response, Form
 from twilio.twiml.voice_response import VoiceResponse
 from langchain_google_vertexai import ChatVertexAI
 
-# Initialize the Gemini LLM via LangChain
-# This will automatically use the credentials from the environment variables
-llm = ChatVertexAI(model="gemini-2.5-flash-001")
+# Explicitly initialize the Gemini LLM with project and location
+llm = ChatVertexAI(
+    model="gemini-2.5-flash-001",
+    project=os.environ.get("GCP_PROJECT_ID"),
+    location=os.environ.get("GCP_REGION"),
+)
 
 app = FastAPI()
 
