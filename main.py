@@ -10,39 +10,30 @@ from supabase import create_client, Client
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from google.oauth2 import service_account
 
-# --- AGENT PERSONA ---
-SYSTEM_PROMPT = """
-You are a friendly, professional, and helpful AI receptionist for a fictional automotive shop called Quantum Auto.
-Your name is Rachel.
-Your primary goal is to answer customer questions and help them book appointments.
-You must follow these rules:
-- Always be polite and cheerful.
-- Keep your answers concise and to the point for a phone conversation.
-- If you don't know the answer to a question, say "I'm sorry, I don't have that information, but I can connect you to a specialist. Please hold." and then end the conversation politely.
-- Do not make up information you don't have.
-Here is some information about Quantum Auto:
-- Business Hours: 8:00 AM to 5:00 PM, Monday to Friday.
-- Location: 123 Future Drive, Neo-Cape Town.
-- Services: We service all makes and models of electric vehicles (EVs). We specialize in battery diagnostics and motor servicing.
-- Booking: To book a service, you need the customer's full name, phone number, and vehicle model.
+# --- BASE AGENT PERSONA ---
+# This is the template for our agent. We will fill in the details later.
+BASE_SYSTEM_PROMPT = """
+You are an efficient AI assistant for Zappiess AI, a provider of AI solutions tailored to the unique needs of South Africa's custom home builders. You provide callers with account information directly and without unnecessary conversation.
+
+Your responses are brief, clear, and professional. Do not engage in small talk. Be direct and to the point.
+
+Your primary goal is to provide callers with accurate account information efficiently.
+1. Greet the caller using their name.
+2. Provide the caller with their account balance.
+3. Answer any questions the caller has about their account.
+4. If a request is outside your capabilities, state it directly and offer a transfer to a human agent for further assistance.
+
+Do not provide information about Zappiess AI's services or products.
+
+Caller's Name: {caller_name}
+Account Balance: R{account_balance}
 """
 
-# --- CLIENT INITIALIZATIONS AND ENHANCED DEBUGGING ---
-print("---- LOADING ENVIRONMENT VARIABLES ----")
-# Google Cloud
+# --- CLIENT INITIALIZATIONS ---
+# This section remains the same for robust authentication.
 gcp_project_id = os.environ.get("GCP_PROJECT_ID")
 gcp_region = os.environ.get("GCP_REGION")
 google_creds_json_str = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-# Supabase
-supabase_url = os.environ.get("SUPABASE_URL")
-supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
-
-print(f"GCP_PROJECT_ID is set: {'Yes' if gcp_project_id else 'No'}")
-print(f"GCP_REGION is set: {'Yes' if gcp_region else 'No'}")
-print(f"GOOGLE_APPLICATION_CREDENTIALS_JSON is set: {'Yes' if google_creds_json_str else 'No'}")
-print(f"SUPABASE_URL is set: {'Yes' if supabase_url else 'No'}")
-print(f"SUPABASE_SERVICE_KEY is set: {'Yes' if supabase_key else 'No'}")
-print("------------------------------------")
 
 credentials = None
 if google_creds_json_str:
@@ -59,56 +50,73 @@ llm = ChatVertexAI(
     credentials=credentials,
 )
 elevenlabs_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
+supabase_url = os.environ.get("SUPABASE_URL")
+supabase_key = os.environ.get("SUPABASE_SERVICE_KEY")
 supabase: Client = create_client(supabase_url, supabase_key)
 
 BUCKET_NAME = "audio-files"
 CONVERSATION_TABLE = "conversations"
+CUSTOMER_TABLE = "customers" # New table for customer data
 
 app = FastAPI()
 
 @app.post("/incoming-call")
-def handle_incoming_call():
+def handle_incoming_call(Caller: str = Form(...)):
+    """Greets the caller and prepares the AI persona based on their phone number."""
+    
+    # --- CUSTOMER LOOKUP ---
+    print(f"Incoming call from: {Caller}")
+    customer_name = "Valued Customer" # Default name
+    greeting = "Hello, and welcome to Zappiess AI." # Default greeting
+
+    try:
+        result = supabase.table(CUSTOMER_TABLE).select("name").eq("phone_number", Caller).single().execute()
+        if result.data:
+            customer_name = result.data.get("name", customer_name)
+            print(f"Found customer: {customer_name}")
+            greeting = f"Hello, {customer_name}." # Personalized greeting
+    except Exception as e:
+        print(f"Could not find customer with phone number {Caller}. Error: {e}")
+
     response = VoiceResponse()
-    response.say("Thank you for calling Quantum Auto. This is Rachel, how can I help you today?")
+    response.say(greeting)
     response.gather(input='speech', action='/process-speech', speech_timeout='auto')
     return Response(content=str(response), media_type="application/xml")
 
 @app.post("/process-speech")
-def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...)):
+def handle_process_speech(SpeechResult: str = Form(...), CallSid: str = Form(...), Caller: str = Form(...)):
     print(f"User said: {SpeechResult}")
-    
-    # --- SUPABASE READ OPERATION ---
-    print(f"Attempting to read history for CallSid: {CallSid}")
-    try:
-        result = supabase.table(CONVERSATION_TABLE).select("history_json").eq("call_sid", CallSid).execute()
-        history = []
-        if result.data:
-            print("Successfully retrieved previous history.")
-            history_json = result.data[0]['history_json']
-            history = [HumanMessage(content=msg['content']) if msg['type'] == 'human' else AIMessage(content=msg['content']) for msg in history_json]
-        else:
-            print("No previous history found for this call.")
-    except Exception as e:
-        print(f"!!! ERROR reading from Supabase: {e}")
-        history = []
 
-    ai_response = llm.invoke([SystemMessage(content=SYSTEM_PROMPT)] + history + [HumanMessage(content=SpeechResult)])
+    # --- DYNAMIC PROMPT INJECTION ---
+    customer_name = "Valued Customer"
+    account_balance = "not available"
+    try:
+        result = supabase.table(CUSTOMER_TABLE).select("name, balance").eq("phone_number", Caller).single().execute()
+        if result.data:
+            customer_name = result.data.get("name", customer_name)
+            account_balance = str(result.data.get("balance", account_balance))
+    except Exception as e:
+        print(f"Error retrieving customer details during conversation: {e}")
+
+    # Format the system prompt with the customer's data
+    system_prompt = BASE_SYSTEM_PROMPT.format(caller_name=customer_name, account_balance=account_balance)
+    
+    # --- CONVERSATION HISTORY & LLM CALL ---
+    result = supabase.table(CONVERSATION_TABLE).select("history_json").eq("call_sid", CallSid).execute()
+    history = []
+    if result.data:
+        history_json = result.data[0]['history_json']
+        history = [HumanMessage(content=msg['content']) if msg['type'] == 'human' else AIMessage(content=msg['content']) for msg in history_json]
+
+    ai_response = llm.invoke([SystemMessage(content=system_prompt)] + history + [HumanMessage(content=SpeechResult)])
     ai_text = ai_response.content
     print(f"Gemini responded: {ai_text}")
 
+    # --- DATABASE & AUDIO ---
     new_history = history + [HumanMessage(content=SpeechResult), AIMessage(content=ai_text)]
     new_history_json = [{"type": "human", "content": msg.content} if isinstance(msg, HumanMessage) else {"type": "ai", "content": msg.content} for msg in new_history]
     
-    # --- SUPABASE WRITE OPERATION ---
-    print(f"Attempting to write history for CallSid: {CallSid}")
-    try:
-        supabase.table(CONVERSATION_TABLE).upsert({
-            "call_sid": CallSid,
-            "history_json": new_history_json
-        }).execute()
-        print("Successfully wrote history to Supabase.")
-    except Exception as e:
-        print(f"!!! ERROR writing to Supabase: {e}")
+    supabase.table(CONVERSATION_TABLE).upsert({"call_sid": CallSid, "history_json": new_history_json}).execute()
 
     audio_bytes = elevenlabs_client.generate(text=ai_text, voice="Rachel")
     
