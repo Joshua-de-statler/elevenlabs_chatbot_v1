@@ -1,9 +1,6 @@
 fastapi
 uvicorn
 twilio
-python-dotenv
 python-multipart
-langchain
-langchain-google-vertexai
+websockets
 elevenlabs==1.0.0
-supabase
